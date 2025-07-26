@@ -1,81 +1,193 @@
-# Secrets during CI jobs in self-hosted Gitlab, without setting them in CI/CD variables
+# Self-hosted GitLab Secrets Box
 
-## Prerequisites
+A secure secrets management solution for self-hosted GitLab CI/CD pipelines that eliminates the need to store sensitive data in CI/CD variables.
 
-- You have a self-hosted Gitlab
-- You have CI jobs, for one or several repos and branches, for which you want to get secrets, but without keeping them in CI/CD variables.
-- You are able to host a docker service on a VPS or anywhere that your runners can reach.
+## Overview
 
-## Goal
+This project provides a secure API endpoint that delivers secrets to GitLab CI jobs using OpenID Connect (OIDC) authentication. Instead of storing secrets in GitLab CI/CD variables, this solution offers a more secure approach by validating JWT tokens from GitLab runners and serving secrets on-demand.
 
-➡️ As we know that storing secrets in CI/CD variables is not secure, we want to be able fetching secrets from a secured API endpoint. We want this endpoint to only accept requests from Gitlab runners jobs (OIDC authentication).
+## ⚠️ Prerequisites
 
-➡️ We gonna expose this `/secrets` API endpoint to Gitlab jobs only, secured with Gitlab public keys and JWT's payload from `id_tokens`. (See "How it works" for more details).
+- Self-hosted GitLab instance
+- GitLab CI jobs that require access to secrets
+- A VPS or server accessible by your GitLab runners
+- A domain name with SSL certificate (or Let's Encrypt support)
+- Docker and Docker Compose installed on your server
 
-## Configure
+## 🔑 Security Features
 
-- Clone this project where you gonna host it. Note that your git runners have to be able to reach the URL that will host it.
-- Create a `.env` file based on `.env.sample`
-- Create your secrets files (`secrets.json`) in the `./secrets` sub-directories, for each of your repos (each repo is an directory named with a numeric ID), and optionally for each of your branches
+- **OIDC Authentication**: Validates JWT tokens from GitLab runners
+- **Project Isolation**: Secrets are organized by project ID and branch
+- **API Token Protection**: Additional security layer with configurable API tokens
+- **JWT Verification**: Uses GitLab's public keys to verify token authenticity
 
-## Start
+## Installation
 
-### Start with Docker and HTTPs
-
-- See _Configure_, and setup the `.env` file that will be mounted in the container
-- Copy and adjust docker-compose.yml
-- Just run `docker compose up -d`. (And if the `network` does not exist, create it: `docker network create web`)
-
-### Start without Docker (manual)
-
-- See _Configure_, and setup the `.env` file
-- Start the project:
+### 1. Clone and Configure
 
 ```bash
+git clone https://github.com/stouch/self-hosted-gitlab-ci-jobs-secrets-box.git
+cd self-hosted-gitlab-ci-jobs-secrets-box
+```
+
+### 2. Environment Setup
+
+Create a `.env` file based on `.env.sample`:
+
+```bash
+cp .env.sample .env
+# Edit .env with your configuration
+```
+
+### 3. DNS Configuration
+
+Configure your domain's DNS to point to your VPS (e.g., `secrets.yourdomain.com`).
+
+### 4. Secrets Organization
+
+Create your secrets files in the `./secrets` directory structure:
+
+```
+secrets/
+├── 123/                    # Project ID
+│   ├── secrets.json        # Default secrets for all branches
+│   ├── main/
+│   │   └── secrets.json    # Branch-specific secrets
+│   └── develop/
+│       └── secrets.json    # Branch-specific secrets
+└── 456/                    # Another project
+    └── secrets.json
+```
+
+### 5. Deployment
+
+```bash
+# Create Docker network if it doesn't exist
+docker network create web
+
+# Start the service
+docker compose up -d
+```
+
+## Usage
+
+### GitLab CI Configuration
+
+Add the following to your `.gitlab-ci.yml`:
+
+```yaml
+variables:
+  GIT_STRATEGY: none
+
+some_job:
+  image: your-image:latest
+  id_tokens:
+    JOB_ID_TOKEN:
+      aud: "https://git.yourdomain.com"  # Must match your .env `aud` configuration
+  script:
+    # Fetch and load secrets
+    - |
+      eval "$(curl -s -X POST \
+        https://secrets.yourdomain.com/secrets?apitk=$SECRETS_API_TOKEN \
+        -H "Content-Type: application/json" \
+        -H "Accept: text/plain" \
+        -d "{\"id_token\": \"$JOB_ID_TOKEN\", \"project_id\": \"$CI_PROJECT_ID\", \"branch_ref\": \"$CI_COMMIT_REF_NAME\"}")"
+    
+    # If you want project-global variables (and not branch variables), remove `"branch_ref"` property from the above curl payload.
+
+    # Your secrets are now available as environment variables
+    - echo "Database URL: $DATABASE_URL"
+    - echo "API Key: $API_KEY"
+```
+
+### Required CI/CD Variables
+
+In your GitLab project, create a CI/CD variable:
+- **Name**: `SECRETS_API_TOKEN`
+- **Value**: The API token configured in your `.env` file
+- **Type**: Variable
+- **Protected**: Yes (recommended)
+- **Masked**: Yes (recommended)
+
+## How It Works
+
+1. **Token Generation**: GitLab generates a JWT token for each CI job using the `id_tokens` configuration
+2. **Request Validation**: The secrets API validates the JWT token using your self-hosted GitLab's public keys
+3. **Audience Verification**: The API verifies the token's audience (`aud`) matches your configuration
+4. **Secrets Retrieval**: Upon successful validation, secrets are returned for the specific project and branch
+5. **Environment Loading**: The CI job loads the secrets as environment variables
+
+### Security Flow
+
+```
+GitLab Runner → JWT Token → Secrets API → Token Validation → Secrets Response
+     ↓              ↓            ↓              ↓              ↓
+  CI Job      OIDC Token    Public Key    GitLab Keys    Environment
+```
+
+## Development
+
+### Local Development Setup
+
+```bash
+# Install dependencies
 npm ci
+
+# Build the project
 npm run build
+
+# Start the development server
 npm run start
 ```
 
-- Then, use nginx or any other proxy webserver to host under https the node app.
+### Production Deployment (without Docker)
 
-## Usage (.gitlab-ci.yml example)
+For production deployment, use a reverse proxy (nginx, Traefik, etc.) to handle SSL termination and forward requests to the Node.js application.
 
-Let's say you host this project under `https://<secrets-box-host-domain>` (See _Start_ section).
+## Configuration
 
-Let's say you created a CI/CD variable `SECRETS_API_TOKEN` (just to add a security layer above the OIDC authentication) in your Git repo.
+### Environment Variables
 
-Here is what you'd need to write in your .gitlab-ci.yml :
+Key configuration options in `.env`:
 
-```yml
-# Just replace `<secrets-box-host-domain>` with the domain where you host the /secrets API
-some_job:
-  image: some-image:latest
-  id_tokens:
-    JOB_ID_TOKEN:
-      aud: "https://git.example.com" # Here you have to set the same `aud` than in the `.env` file of the secrets box host.
-  variables:
-    GIT_STRATEGY: none
-  script:
-    # You just have to eval the response of `/secrets`, because it returns directly the different `export XXX="""..."""`
-    # Dont forget to keep the `"` surrounding the curl command in the eval, because if not, you would loose the \n in your env vars.
-    - >
-      eval "$(curl -s -X POST https://<secrets-box-host-domain>/secrets?apitk=$SECRETS_API_TOKEN -H "Content-Type: application/json" -H "Accept: text/plain" -d "{\"id_token\": \"$JOB_ID_TOKEN\", \"project_id\": \"$CI_PROJECT_ID\", \"branch_ref\": \"$CI_COMMIT_REF_NAME\"}")"
-      #
-      # We are done !
-      # You can now access your secrets:
-      #
-      echo $ONE_OF_YOUR_SECRET
+- `ISSUER_URL`: Your GitLab instance URL
+- `EXPECTED_AUDIENCE`: Expected audience in JWT tokens
+- `API_TOKEN`: Security token for API access
+- `PORT`: Application port (default: 3000)
+
+### Secrets File Format
+
+Secrets files should be JSON format:
+
+```json
+{
+  "DATABASE_URL": "postgresql://user:pass@host:5432/db",
+  "API_KEY": "your-api-key-here",
+  "REDIS_URL": "redis://localhost:6379"
+}
 ```
 
-🎉 Everything is ready
+## Troubleshooting
 
-## ℹ️ How it works (more details)
+### Common Issues
 
-- During each of your git jobs, Gitlab creates a variable using the `id_tokens` section in the .gitlab-ci.yml (https://docs.gitlab.com/ci/secrets/id_token_authentication/).
-- The variable contains a JWT payload containing all the information of the runner job (time, branch, job author, etc)
-- This JWT payload can be verified using the `issuer` (`.env`) and the `/oauth/discovery/keys` public keys from your self-hosted Gitlab.
-- This payload contains an expected and valid `aud` (`.env`) which is by default the git allowed domain
-- Once the payload is verified and we're sure it's been computed by the issuer (meaning: it comes from your Git runners), we return the secrets from your secrets directories.
+1. **JWT Validation Failed**: Ensure `ISSUER_URL` and `EXPECTED_AUDIENCE` match your GitLab configuration
+2. **Secrets Not Found**: Verify the project ID and branch structure in the `secrets/` directory
+3. **Network Connectivity**: Ensure GitLab runners can reach your secrets API endpoint
 
-We use https://www.npmjs.com/package/jose to verify the JWT payload.
+### Logs
+
+Check Docker logs for debugging:
+
+```bash
+docker compose logs -f
+```
+
+## Security Considerations
+
+- Keep your `.env` file secure and never commit it to version control
+- Use HTTPS in production with valid SSL certificates
+- Regularly rotate API tokens
+- Monitor access logs for suspicious activity
+- Consider implementing rate limiting for additional security
+
