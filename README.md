@@ -22,13 +22,13 @@
 
 ### Start with Docker and HTTPs
 
-- See _Installation_, and setup the `.env` file that will be mounted in the container
+- See _Configure_, and setup the `.env` file that will be mounted in the container
 - Copy and adjust docker-compose.yml
 - Just run `docker compose up -d`. (And if the `network` does not exist, create it: `docker network create web`)
 
 ### Start without Docker (manual)
 
-- See _Installation_, and setup the `.env` file
+- See _Configure_, and setup the `.env` file
 - Start the project:
 
 ```bash
@@ -57,9 +57,10 @@ some_job:
   variables:
     GIT_STRATEGY: none
   script:
-    # You just have to eval the response of `/secrets`, because it returns directly the different `export XXX="..."`
+    # You just have to eval the response of `/secrets`, because it returns directly the different `export XXX="""..."""`
+    # Dont forget to keep the `"` surrounding the curl command in the eval, because if not, you would loose the \n in your env vars.
     - >
-      eval $(curl -s -X POST https://<secrets-box-host-domain>/secrets?apitk=$SECRETS_API_TOKEN -H "Content-Type: application/json" -H "Accept: text/plain" -d "{\"id_token\": \"$JOB_ID_TOKEN\", \"project_id\": \"$CI_PROJECT_ID\", \"branch_ref\": \"$CI_COMMIT_REF_NAME\"}")
+      eval "$(curl -s -X POST https://<secrets-box-host-domain>/secrets?apitk=$SECRETS_API_TOKEN -H "Content-Type: application/json" -H "Accept: text/plain" -d "{\"id_token\": \"$JOB_ID_TOKEN\", \"project_id\": \"$CI_PROJECT_ID\", \"branch_ref\": \"$CI_COMMIT_REF_NAME\"}")"
       #
       # We are done !
       # You can now access your secrets:

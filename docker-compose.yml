@@ -1,6 +1,6 @@
 version: '3.8'
 
-# You have to change `yourdomain.com':
+# You have to change `yourdomain.com' and 'you@example.com':
 
 services:
   secrets_box:
@@ -9,6 +9,7 @@ services:
       - .env
     ports:
       - "3001:3000"
+    restart: always
     volumes:
       - ./secrets:/app/secrets
     labels:
