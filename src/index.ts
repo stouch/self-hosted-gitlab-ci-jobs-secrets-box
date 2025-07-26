@@ -2,7 +2,7 @@ import express, { NextFunction, Request, Response } from "express";
 import fs from "fs";
 import { jwtVerify, createRemoteJWKSet } from "jose";
 import dotenv from "dotenv";
-import { toExportEnv } from "./adapter";
+import { toExportEnv } from "./adapter.js";
 dotenv.config({ path: ".env" });
 
 const app = express();
