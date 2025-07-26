@@ -1,0 +1,45 @@
+version: '3.8'
+
+# You have to change `yourdomain.com':
+
+services:
+  secrets_box:
+    build: .
+    env_file:
+      - .env
+    ports:
+      - "3001:3000"
+    volumes:
+      - ./secrets:/app/secrets
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.node.rule=Host(`yourdomain.com`)"
+      - "traefik.http.routers.node.entrypoints=websecure"
+      - "traefik.http.routers.node.tls.certresolver=secretsBoxResolver"
+      - "traefik.http.services.node.loadbalancer.server.port=3000" # Project port (see .env)
+    networks:
+      - web
+
+  traefik:
+    image: traefik:v2.11
+    command:
+      - "--api.dashboard=true"
+      - "--providers.docker=true"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.secretsBoxResolver.acme.httpchallenge=true"
+      - "--certificatesresolvers.secretsBoxResolver.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.secretsBoxResolver.acme.email=you@example.com"
+      - "--certificatesresolvers.secretsBoxResolver.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./letsencrypt:/letsencrypt"
+    networks:
+      - web
+
+networks:
+  web:
+    external: true
